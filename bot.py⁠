@@ -1,0 +1,88 @@
+import asyncio
+from aiogram import Bot, Dispatcher, F, types
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, MediaGroupBuilder
+
+BOT_TOKEN = "8832561907:AAGht5xMvo_oDEGiBkMXTGevMD2JO5Bufhk"
+ADMIN_ID = 7962428470
+
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(storage=MemoryStorage())
+
+class TaskSubmission(StatesGroup):
+    waiting_for_photos = State()
+
+def main_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📢 Начать задание")]],
+        resize_keyboard=True
+    )
+
+def submit_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📸 Отправить выполнение")]],
+        resize_keyboard=True
+    )
+
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        "Привет! Нажми кнопку ниже, чтобы начать задание.",
+        reply_markup=main_keyboard()
+    )
+
+@dp.message(F.text == "📢 Начать задание")
+async def start_task(message: types.Message):
+    task_text = (
+        "📌 Задание: Нужно сделать 10 комментариев в TikTok.\n\n"
+        "После того как выполнишь задание, нажми кнопку «📸 Отправить выполнение»."
+    )
+    await message.answer(task_text, reply_markup=submit_keyboard())
+
+@dp.message(F.text == "📸 Отправить выполнение")
+async def request_photos(message: types.Message, state: FSMContext):
+    await state.set_state(TaskSubmission.waiting_for_photos)
+    await state.update_data(photos=[])
+    await message.answer(
+        "Отправь 10 скриншотов, подтверждающих выполнение задания.\n"
+        "Можешь отправить их по очереди или альбомом."
+    )
+
+@dp.message(TaskSubmission.waiting_for_photos, F.photo)
+async def process_photo(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    photos = data.get("photos", [])
+    
+    photos.append(message.photo[-1].file_id)
+    await state.update_data(photos=photos)
+
+    if len(photos) < 10:
+        await message.answer(f"Принято фото: {len(photos)}/10. Отправь оставшиеся.")
+        return
+
+    await message.answer("✅ Заявка отправлена на проверку. Ожидайте.")
+    
+    user_info = (
+        f"📩 Новая заявка на проверку!\n\n"
+        f"От: {message.from_user.full_name} (@{message.from_user.username})\n"
+        f"ID: {message.from_user.id}"
+    )
+    
+    await bot.send_message(chat_id=ADMIN_ID, text=user_info)
+    
+    media_group = MediaGroupBuilder(caption="Скриншоты выполнения:")
+    for photo_id in photos:
+        media_group.add_photo(media=photo_id)
+        
+    await bot.send_media_group(chat_id=ADMIN_ID, media=media_group.build())
+    await state.clear()
+
+async def main():
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
